@@ -36,6 +36,7 @@ async fn main() {
             hello,
             endpoints::deposit::post_deposit,
             endpoints::sign::post_public_nonce,
+            endpoints::sign::post_partial_signature,
         ])
         .register("/", catchers![
             not_found

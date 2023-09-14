@@ -13,6 +13,7 @@ pub struct PublicNonceRequestPayload {
     statechain_id: String,
 }
 
+/*
 async fn get_auth_key_by_statechain_id(pool: &State<sqlx::PgPool>, statechain_id: String) -> Result<XOnlyPublicKey, sqlx::Error> {
 
     let row = sqlx::query(
@@ -35,9 +36,10 @@ async fn get_auth_key_by_statechain_id(pool: &State<sqlx::PgPool>, statechain_id
     };
 
 }
+*/
 
 #[post("/public_nonce", format = "json", data = "<public_nonce_request_payload>")]
-pub async fn post_public_nonce(pool: &State<sqlx::PgPool>, public_nonce_request_payload: Json<PublicNonceRequestPayload>) -> status::Custom<Json<Value>>  {
+pub async fn post_public_nonce(public_nonce_request_payload: Json<PublicNonceRequestPayload>) -> status::Custom<Json<Value>>  {
 
     let lockbox_endpoint = "http://0.0.0.0:18080";
     let path = "get_public_nonce";
@@ -78,3 +80,53 @@ pub async fn post_public_nonce(pool: &State<sqlx::PgPool>, public_nonce_request_
 
     return status::Custom(Status::Ok, Json(response_body));
 }
+
+#[derive(Serialize, Deserialize)]
+#[serde(crate = "rocket::serde")]
+pub struct PartialSignatureRequestPayload<'r> {
+    statechain_id: &'r str,
+    keyaggcoef: &'r str,
+    negate_seckey: u8,
+    session: &'r str,
+}
+
+#[post("/partial_signature", format = "json", data = "<partial_signature_request_payload>")]
+pub async fn post_partial_signature(pool: &State<sqlx::PgPool>, partial_signature_request_payload: Json<PartialSignatureRequestPayload<'_>>) -> status::Custom<Json<Value>>  {
+    
+    let lockbox_endpoint = "http://0.0.0.0:18080";
+    let path = "get_partial_signature";
+
+    let client: reqwest::Client = reqwest::Client::new();
+    let request = client.post(&format!("{}/{}", lockbox_endpoint, path));
+
+    let value = match request.json(&partial_signature_request_payload.0).send().await {
+        Ok(response) => {
+            let text = response.text().await.unwrap();
+            text
+        },
+        Err(err) => {
+            println!("ERROR sig: {}", err);
+
+            let response_body = json!({
+                "error": "Internal Server Error",
+                "message": err.to_string()
+            });
+        
+            return status::Custom(Status::InternalServerError, Json(response_body));
+        },
+    };
+
+    println!("value sig: {}", value);
+
+    #[derive(Serialize, Deserialize, Debug, Clone)]
+    pub struct PartialSignatureResponsePayload<'r> {
+        partial_sig: &'r str,
+    }
+
+    let response: PartialSignatureResponsePayload = serde_json::from_str(value.as_str()).expect(&format!("failed to parse: {}", value.as_str()));
+
+    let response_body = json!(response);
+
+    return status::Custom(Status::Ok, Json(response_body));
+}
+   
