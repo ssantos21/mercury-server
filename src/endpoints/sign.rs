@@ -114,8 +114,8 @@ pub struct PartialSignatureRequestPayload<'r> {
     session: &'r str,
 }
 
-#[post("/partial_signature", format = "json", data = "<partial_signature_request_payload>")]
-pub async fn post_partial_signature(pool: &State<sqlx::PgPool>, partial_signature_request_payload: Json<PartialSignatureRequestPayload<'_>>) -> status::Custom<Json<Value>>  {
+#[post("/sign/second", format = "json", data = "<partial_signature_request_payload>")]
+pub async fn sign_second (pool: &State<sqlx::PgPool>, partial_signature_request_payload: Json<PartialSignatureRequestPayload<'_>>) -> status::Custom<Json<Value>>  {
     
     let lockbox_endpoint = "http://0.0.0.0:18080";
     let path = "get_partial_signature";
