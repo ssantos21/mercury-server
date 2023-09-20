@@ -57,6 +57,17 @@ pub async fn update_commitments(pool: &State<sqlx::PgPool>, r2_commitment: &str,
         .unwrap();
 }
 
+pub async fn validate_signature(pool: &State<sqlx::PgPool>, signed_message_hex: &str, statechain_id: &str) -> bool {
+
+    let auth_key = get_auth_key_by_statechain_id(pool, statechain_id).await.unwrap();
+
+    let signed_message = Signature::from_str(signed_message_hex).unwrap();
+    let msg = Message::from_hashed_data::<sha256::Hash>(statechain_id.to_string().as_bytes());
+
+    let secp = Secp256k1::new();
+    secp.verify_schnorr(&signed_message, &msg, &auth_key).is_ok()
+}
+
 #[post("/sign/first", format = "json", data = "<sign_first_request_payload>")]
 pub async fn sign_first(pool: &State<sqlx::PgPool>, sign_first_request_payload: Json<SignFirstRequestPayload>) -> status::Custom<Json<Value>>  {
 
@@ -69,14 +80,9 @@ pub async fn sign_first(pool: &State<sqlx::PgPool>, sign_first_request_payload: 
     let statechain_id = sign_first_request_payload.0.statechain_id.clone();
     let r2_commitment = sign_first_request_payload.0.r2_commitment.clone();
     let blind_commitment = sign_first_request_payload.0.blind_commitment.clone();
-    let signed_statechain_id = Signature::from_str(&sign_first_request_payload.0.signed_statechain_id).unwrap();
+    let signed_statechain_id = sign_first_request_payload.0.signed_statechain_id.clone();
 
-    let msg = Message::from_hashed_data::<sha256::Hash>(statechain_id.to_string().as_bytes());
-
-    let auth_key = get_auth_key_by_statechain_id(pool, &statechain_id).await.unwrap();
-
-    let secp = Secp256k1::new();
-    if !secp.verify_schnorr(&signed_statechain_id, &msg, &auth_key).is_ok() {
+    if !validate_signature(pool, &signed_statechain_id, &statechain_id).await {
 
         let response_body = json!({
             "error": "Internal Server Error",
@@ -129,6 +135,7 @@ pub struct PartialSignatureRequestPayload<'r> {
     keyaggcoef: &'r str,
     negate_seckey: u8,
     session: &'r str,
+    signed_statechain_id: String,
 }
 
 #[post("/sign/second", format = "json", data = "<partial_signature_request_payload>")]
@@ -139,6 +146,19 @@ pub async fn sign_second (pool: &State<sqlx::PgPool>, partial_signature_request_
 
     let client: reqwest::Client = reqwest::Client::new();
     let request = client.post(&format!("{}/{}", lockbox_endpoint, path));
+
+    let statechain_id = partial_signature_request_payload.0.statechain_id.clone();
+    let signed_statechain_id = partial_signature_request_payload.0.signed_statechain_id.clone();
+
+    if !validate_signature(pool, &signed_statechain_id, &statechain_id).await {
+
+        let response_body = json!({
+            "error": "Internal Server Error",
+            "message": "Signature does not match authentication key."
+        });
+    
+        return status::Custom(Status::InternalServerError, Json(response_body));
+    }
 
     let value = match request.json(&partial_signature_request_payload.0).send().await {
         Ok(response) => {
