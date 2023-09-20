@@ -9,8 +9,10 @@ use sqlx::Row;
 
 #[derive(Serialize, Deserialize)]
 #[serde(crate = "rocket::serde")]
-pub struct PublicNonceRequestPayload {
+pub struct SignFirstRequestPayload {
     statechain_id: String,
+    r2_commitment: String,
+    blind_commitment: String,
 }
 
 /*
@@ -38,8 +40,24 @@ async fn get_auth_key_by_statechain_id(pool: &State<sqlx::PgPool>, statechain_id
 }
 */
 
-#[post("/public_nonce", format = "json", data = "<public_nonce_request_payload>")]
-pub async fn post_public_nonce(public_nonce_request_payload: Json<PublicNonceRequestPayload>) -> status::Custom<Json<Value>>  {
+pub async fn update_commitments(pool: &State<sqlx::PgPool>, r2_commitment: &str, blind_commitment: &str, statechain_id: &str)  {
+
+    let query = "\
+        UPDATE key_data \
+        SET r2_commitment= $1, blind_commitment = $2 \
+        WHERE statechain_id = $3";
+
+    let _ = sqlx::query(query)
+        .bind(r2_commitment)
+        .bind(blind_commitment)
+        .bind(statechain_id)
+        .execute(pool.inner())
+        .await
+        .unwrap();
+}
+
+#[post("/sign/first", format = "json", data = "<sign_first_request_payload>")]
+pub async fn sign_first(pool: &State<sqlx::PgPool>, sign_first_request_payload: Json<SignFirstRequestPayload>) -> status::Custom<Json<Value>>  {
 
     let lockbox_endpoint = "http://0.0.0.0:18080";
     let path = "get_public_nonce";
@@ -47,7 +65,13 @@ pub async fn post_public_nonce(public_nonce_request_payload: Json<PublicNonceReq
     let client: reqwest::Client = reqwest::Client::new();
     let request = client.post(&format!("{}/{}", lockbox_endpoint, path));
 
-    let value = match request.json(&public_nonce_request_payload.0).send().await {
+    let statechain_id = sign_first_request_payload.0.statechain_id.clone();
+    let r2_commitment = sign_first_request_payload.0.r2_commitment.clone();
+    let blind_commitment = sign_first_request_payload.0.blind_commitment.clone();
+
+    update_commitments(pool, &r2_commitment, &blind_commitment, &statechain_id).await;
+
+    let value = match request.json(&sign_first_request_payload.0).send().await {
         Ok(response) => {
             let text = response.text().await.unwrap();
             text

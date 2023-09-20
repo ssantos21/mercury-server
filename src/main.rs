@@ -35,7 +35,7 @@ async fn main() {
         .mount("/", routes![
             hello,
             endpoints::deposit::post_deposit,
-            endpoints::sign::post_public_nonce,
+            endpoints::sign::sign_first,
             endpoints::sign::post_partial_signature,
         ])
         .register("/", catchers![
