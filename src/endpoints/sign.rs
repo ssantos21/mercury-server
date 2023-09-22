@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sqlx::Row;
 
+use crate::server::StateChainEntity;
+
 #[derive(Serialize, Deserialize)]
 #[serde(crate = "rocket::serde")]
 pub struct SignFirstRequestPayload {
@@ -17,14 +19,14 @@ pub struct SignFirstRequestPayload {
 }
 
 
-async fn get_auth_key_by_statechain_id(pool: &State<sqlx::PgPool>, statechain_id: &str) -> Result<XOnlyPublicKey, sqlx::Error> {
+async fn get_auth_key_by_statechain_id(pool: &sqlx::PgPool, statechain_id: &str) -> Result<XOnlyPublicKey, sqlx::Error> {
 
     let row = sqlx::query(
         "SELECT auth_xonly_public_key \
         FROM public.key_data \
         WHERE statechain_id = $1")
         .bind(&statechain_id)
-        .fetch_one(pool.clone().inner())
+        .fetch_one(pool)
         .await;
 
     match row {
@@ -41,7 +43,7 @@ async fn get_auth_key_by_statechain_id(pool: &State<sqlx::PgPool>, statechain_id
 }
 
 
-pub async fn update_commitments(pool: &State<sqlx::PgPool>, r2_commitment: &str, blind_commitment: &str, statechain_id: &str)  {
+pub async fn update_commitments(pool: &sqlx::PgPool, r2_commitment: &str, blind_commitment: &str, statechain_id: &str)  {
 
     let query = "\
         UPDATE key_data \
@@ -52,12 +54,12 @@ pub async fn update_commitments(pool: &State<sqlx::PgPool>, r2_commitment: &str,
         .bind(r2_commitment)
         .bind(blind_commitment)
         .bind(statechain_id)
-        .execute(pool.inner())
+        .execute(pool)
         .await
         .unwrap();
 }
 
-pub async fn validate_signature(pool: &State<sqlx::PgPool>, signed_message_hex: &str, statechain_id: &str) -> bool {
+pub async fn validate_signature(pool: &sqlx::PgPool, signed_message_hex: &str, statechain_id: &str) -> bool {
 
     let auth_key = get_auth_key_by_statechain_id(pool, statechain_id).await.unwrap();
 
@@ -69,9 +71,11 @@ pub async fn validate_signature(pool: &State<sqlx::PgPool>, signed_message_hex: 
 }
 
 #[post("/sign/first", format = "json", data = "<sign_first_request_payload>")]
-pub async fn sign_first(pool: &State<sqlx::PgPool>, sign_first_request_payload: Json<SignFirstRequestPayload>) -> status::Custom<Json<Value>>  {
+pub async fn sign_first(statechain_entity: &State<StateChainEntity>, sign_first_request_payload: Json<SignFirstRequestPayload>) -> status::Custom<Json<Value>>  {
 
-    let lockbox_endpoint = "http://0.0.0.0:18080";
+    let statechain_entity = statechain_entity.inner();
+
+    let lockbox_endpoint = statechain_entity.config.lockbox.clone().unwrap();
     let path = "get_public_nonce";
 
     let client: reqwest::Client = reqwest::Client::new();
@@ -82,7 +86,7 @@ pub async fn sign_first(pool: &State<sqlx::PgPool>, sign_first_request_payload: 
     let blind_commitment = sign_first_request_payload.0.blind_commitment.clone();
     let signed_statechain_id = sign_first_request_payload.0.signed_statechain_id.clone();
 
-    if !validate_signature(pool, &signed_statechain_id, &statechain_id).await {
+    if !validate_signature(&statechain_entity.pool, &signed_statechain_id, &statechain_id).await {
 
         let response_body = json!({
             "error": "Internal Server Error",
@@ -92,7 +96,7 @@ pub async fn sign_first(pool: &State<sqlx::PgPool>, sign_first_request_payload: 
         return status::Custom(Status::InternalServerError, Json(response_body));
     }
 
-    update_commitments(pool, &r2_commitment, &blind_commitment, &statechain_id).await;
+    update_commitments(&statechain_entity.pool, &r2_commitment, &blind_commitment, &statechain_id).await;
 
     let value = match request.json(&sign_first_request_payload.0).send().await {
         Ok(response) => {
@@ -139,9 +143,11 @@ pub struct PartialSignatureRequestPayload<'r> {
 }
 
 #[post("/sign/second", format = "json", data = "<partial_signature_request_payload>")]
-pub async fn sign_second (pool: &State<sqlx::PgPool>, partial_signature_request_payload: Json<PartialSignatureRequestPayload<'_>>) -> status::Custom<Json<Value>>  {
+pub async fn sign_second (statechain_entity: &State<StateChainEntity>, partial_signature_request_payload: Json<PartialSignatureRequestPayload<'_>>) -> status::Custom<Json<Value>>  {
     
-    let lockbox_endpoint = "http://0.0.0.0:18080";
+    let statechain_entity = statechain_entity.inner();
+
+    let lockbox_endpoint = statechain_entity.config.lockbox.clone().unwrap();
     let path = "get_partial_signature";
 
     let client: reqwest::Client = reqwest::Client::new();
@@ -150,7 +156,7 @@ pub async fn sign_second (pool: &State<sqlx::PgPool>, partial_signature_request_
     let statechain_id = partial_signature_request_payload.0.statechain_id.clone();
     let signed_statechain_id = partial_signature_request_payload.0.signed_statechain_id.clone();
 
-    if !validate_signature(pool, &signed_statechain_id, &statechain_id).await {
+    if !validate_signature(&statechain_entity.pool, &signed_statechain_id, &statechain_id).await {
 
         let response_body = json!({
             "error": "Internal Server Error",

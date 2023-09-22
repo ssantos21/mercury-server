@@ -1,47 +1,51 @@
 mod endpoints;
+mod server_config;
+mod server;
 
 #[macro_use] extern crate rocket;
 
-use rocket::serde::json::{Value, json};
-use sqlx::postgres::PgPoolOptions;
+use rocket::{serde::json::{Value, json}, Request};
+use server::StateChainEntity;
 
-#[get("/")]
-fn hello() -> &'static str {
-    "Hello, world!\n"
+#[catch(500)]
+fn internal_error() -> Value {
+    json!("Internal server error")
+}
+
+#[catch(400)]
+fn bad_request() -> Value {
+    json!("Bad request")
 }
 
 #[catch(404)]
-fn not_found() -> Value {
-    json!("Not found!")
+fn not_found(req: &Request) -> Value {
+    json!(format!("Not found! Unknown route '{}'.", req.uri()))
 }
-
 
 #[rocket::main]
 async fn main() {
 
-    let pool = 
-        PgPoolOptions::new()
-        // .max_connections(5)
-        .connect("postgresql://postgres:postgres@localhost/mercury")
-        .await
-        .unwrap();
+    server_config::ServerConfig::load();
+
+    let statechain_entity = StateChainEntity::new().await;
 
     sqlx::migrate!("./migrations")
-        .run(&pool)
+        .run(&statechain_entity.pool)
         .await
         .unwrap();
 
     let _ = rocket::build()
         .mount("/", routes![
-            hello,
             endpoints::deposit::post_deposit,
             endpoints::sign::sign_first,
             endpoints::sign::sign_second,
         ])
         .register("/", catchers![
-            not_found
+            not_found,
+            internal_error, 
+            bad_request,
         ])
-        .manage(pool)
+        .manage(statechain_entity)
         // .attach(MercuryPgDatabase::fairing())
         .launch()
         .await;

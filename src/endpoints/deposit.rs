@@ -6,6 +6,8 @@ use secp256k1_zkp::{XOnlyPublicKey, schnorr::Signature, Message, Secp256k1, Publ
 use serde::{Serialize, Deserialize};
 use serde_json::{Value, json};
 
+use crate::server::StateChainEntity;
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DepositRequestPayload {
     amount: u64,
@@ -15,7 +17,9 @@ pub struct DepositRequestPayload {
 }
 
 #[post("/deposit/init/pod", format = "json", data = "<deposit_request_payload>")]
-pub async fn post_deposit(pool: &State<sqlx::PgPool>, deposit_request_payload: Json<DepositRequestPayload>) -> status::Custom<Json<Value>>  {
+pub async fn post_deposit(statechain_entity: &State<StateChainEntity>, deposit_request_payload: Json<DepositRequestPayload>) -> status::Custom<Json<Value>>  {
+
+    let statechain_entity = statechain_entity.inner();
 
     let auth_key = XOnlyPublicKey::from_str(&deposit_request_payload.auth_key).unwrap();
     let amount = deposit_request_payload.amount;
@@ -83,7 +87,7 @@ pub async fn post_deposit(pool: &State<sqlx::PgPool>, deposit_request_payload: J
 
     let server_pubkey = PublicKey::from_str(&server_pubkey_hex).unwrap();
 
-    insert_new_deposit(pool, &token_id, &auth_key, &server_pubkey, amount, &statechain_id).await;
+    insert_new_deposit(&statechain_entity.pool, &token_id, &auth_key, &server_pubkey, amount, &statechain_id).await;
 
     let response_body = json!({
         "server_pubkey": server_pubkey.to_string(),
@@ -93,7 +97,7 @@ pub async fn post_deposit(pool: &State<sqlx::PgPool>, deposit_request_payload: J
     status::Custom(Status::Ok, Json(response_body))
 }
 
-pub async fn insert_new_deposit(pool: &State<sqlx::PgPool>, token_id: &str, auth_key: &XOnlyPublicKey, server_public_key: &PublicKey, amount: u64, statechain_id: &String)  {
+pub async fn insert_new_deposit(pool: &sqlx::PgPool, token_id: &str, auth_key: &XOnlyPublicKey, server_public_key: &PublicKey, amount: u64, statechain_id: &String)  {
 
     let query = "INSERT INTO key_data (token_id, auth_xonly_public_key, server_public_key, amount, statechain_id) VALUES ($1, $2, $3, $4, $5)";
 
@@ -103,7 +107,7 @@ pub async fn insert_new_deposit(pool: &State<sqlx::PgPool>, token_id: &str, auth
         .bind(&server_public_key.serialize())
         .bind(amount as i64)
         .bind(statechain_id)
-        .execute(pool.inner())
+        .execute(pool)
         .await
         .unwrap();
 }
