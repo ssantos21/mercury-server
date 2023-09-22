@@ -4,6 +4,7 @@ mod server;
 
 #[macro_use] extern crate rocket;
 
+use endpoints::utils;
 use rocket::{serde::json::{Value, json}, Request};
 use server::StateChainEntity;
 
@@ -39,6 +40,7 @@ async fn main() {
             endpoints::deposit::post_deposit,
             endpoints::sign::sign_first,
             endpoints::sign::sign_second,
+            utils::info_config,
         ])
         .register("/", catchers![
             not_found,

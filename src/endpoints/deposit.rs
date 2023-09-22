@@ -17,7 +17,7 @@ pub struct DepositRequestPayload {
 }
 
 #[post("/deposit/init/pod", format = "json", data = "<deposit_request_payload>")]
-pub async fn post_deposit(statechain_entity: &State<StateChainEntity>, deposit_request_payload: Json<DepositRequestPayload>) -> status::Custom<Json<Value>>  {
+pub async fn post_deposit(statechain_entity: &State<StateChainEntity>, deposit_request_payload: Json<DepositRequestPayload>) -> status::Custom<Json<Value>> {
 
     let statechain_entity = statechain_entity.inner();
 
